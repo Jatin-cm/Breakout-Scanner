@@ -12,3 +12,23 @@ label{display:block;font-weight:700;margin:13px 0 7px}textarea{width:100%;resize
 .logs{background:#080d19;border:1px solid #26324b;border-radius:12px;padding:14px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;color:#b9c7df;font-size:.86rem}
 footer{text-align:center;color:#73809a;font-size:.84rem;margin-top:22px}
 @media(max-width:700px){.top,.row.between{align-items:flex-start;flex-direction:column}.grid,.stats,.telegram-options{grid-template-columns:1fr}.buttons button{flex:1}}
+
+
+/* 24-hour movers table */
+.movers-panel{min-width:0}
+.movers-heading{align-items:flex-start}
+.mover-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.refresh-meta{font-size:.82rem;color:#9ca9c2;white-space:nowrap}
+.mover-summary{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:16px 0 10px;font-size:.9rem}
+.table-wrap{width:100%;overflow-x:auto;border:1px solid #28334e;border-radius:12px}
+.movers-table{width:100%;border-collapse:collapse;min-width:760px;font-size:.9rem}
+.movers-table th,.movers-table td{text-align:right;padding:12px 14px;border-bottom:1px solid #26324b;white-space:nowrap}
+.movers-table th{background:#0d1426;color:#aebbd3;font-weight:700;font-size:.8rem}
+.movers-table th:first-child,.movers-table td:first-child{text-align:left}
+.movers-table tbody tr:last-child td{border-bottom:0}
+.movers-table tbody tr:hover{background:#1a243b}
+.movers-table .coin-symbol{font-weight:800;color:#e9efff}
+.change-up{color:#37d996;font-weight:800}
+.change-down{color:#ff7884;font-weight:800}
+.table-empty{text-align:center!important;color:#9ca9c2;padding:24px!important}
+@media(max-width:700px){.movers-heading{flex-direction:column}.mover-actions{width:100%;justify-content:space-between}}

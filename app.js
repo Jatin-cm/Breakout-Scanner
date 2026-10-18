@@ -3,6 +3,9 @@
 "use strict";
 
 const BINANCE_KLINES = "https://fapi.binance.com/fapi/v1/klines";
+const BINANCE_24H_TICKER = "https://fapi.binance.com/fapi/v1/ticker/24hr";
+const MOVERS_REFRESH_MS = 60 * 60 * 1000;
+const MOVERS_THRESHOLD_PERCENT = 20;
 const SCAN_INTERVAL_MS = 60_000;
 const MAX_SYMBOLS_PER_LIST = 15;
 
@@ -12,6 +15,8 @@ let scanInProgress = false;
 let lastScanAt = null;
 let signalCount = 0;
 let latestSignalText = "";
+let moversTimer = null;
+let moversFetchInProgress = false;
 const lastHourTimestamp = Object.create(null);
 const fastHighSent = Object.create(null);
 const fastLowSent = Object.create(null);
@@ -62,6 +67,99 @@ async function fetchKlines(symbol, interval, limit) {
   if (!Array.isArray(data)) throw new Error(`Unexpected Binance response for ${symbol}`);
   return data;
 }
+
+function formatPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString(undefined, {maximumFractionDigits: 8});
+}
+function formatVolume(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString(undefined, {notation: "compact", maximumFractionDigits: 2});
+}
+function renderMovers(rows) {
+  const body = $("moversBody");
+  body.replaceChildren();
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "table-empty";
+    td.textContent = `No USDT-margined futures symbols currently exceed ±${MOVERS_THRESHOLD_PERCENT}% in 24 hours.`;
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
+  }
+  for (const coin of rows) {
+    const tr = document.createElement("tr");
+    const symbol = document.createElement("td");
+    symbol.className = "coin-symbol";
+    symbol.textContent = coin.symbol;
+    const change = document.createElement("td");
+    const changeValue = Number(coin.priceChangePercent);
+    change.className = changeValue >= 0 ? "change-up" : "change-down";
+    change.textContent = `${changeValue > 0 ? "+" : ""}${changeValue.toFixed(2)}%`;
+    const last = document.createElement("td");
+    last.textContent = formatPrice(coin.lastPrice);
+    const high = document.createElement("td");
+    high.textContent = formatPrice(coin.highPrice);
+    const low = document.createElement("td");
+    low.textContent = formatPrice(coin.lowPrice);
+    const volume = document.createElement("td");
+    volume.textContent = formatVolume(coin.quoteVolume);
+    for (const td of [symbol, change, last, high, low, volume]) tr.appendChild(td);
+    body.appendChild(tr);
+  }
+}
+async function refresh24HourMovers(manual = false) {
+  if (moversFetchInProgress) return;
+  moversFetchInProgress = true;
+  $("moversStatus").textContent = "Fetching Binance Futures ticker data…";
+  if (manual) $("refreshMoversBtn").disabled = true;
+  try {
+    const response = await fetch(BINANCE_24H_TICKER, {cache: "no-store"});
+    if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data)) throw new Error("Unexpected 24-hour ticker response");
+
+    // Show USDT-margined contracts and either side of a >20% move.
+    const movers = data
+      .filter(coin => typeof coin.symbol === "string" && coin.symbol.endsWith("USDT"))
+      .filter(coin => Number.isFinite(Number(coin.priceChangePercent)) &&
+                      Math.abs(Number(coin.priceChangePercent)) > MOVERS_THRESHOLD_PERCENT)
+      .sort((a, b) => Math.abs(Number(b.priceChangePercent)) - Math.abs(Number(a.priceChangePercent)));
+
+    renderMovers(movers);
+    $("moversCount").textContent = `${movers.length} coin${movers.length === 1 ? "" : "s"} found`;
+    const updated = new Date();
+    $("moversUpdated").textContent = `Updated ${updated.toLocaleTimeString()}`;
+    $("moversStatus").textContent = `Showing USDT contracts with absolute 24h change > ${MOVERS_THRESHOLD_PERCENT}%.`;
+    log(`24h movers refreshed: ${movers.length} USDT futures symbols exceed ±${MOVERS_THRESHOLD_PERCENT}%.`);
+  } catch (error) {
+    $("moversStatus").textContent = `Update failed: ${error.message}`;
+    log(`24h movers ERROR: ${error.message}`);
+    if (!$("moversBody").children.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.className = "table-empty";
+      td.textContent = "Could not load market data. Check your connection and retry.";
+      tr.appendChild(td);
+      $("moversBody").appendChild(tr);
+    }
+  } finally {
+    moversFetchInProgress = false;
+    if (manual) $("refreshMoversBtn").disabled = false;
+  }
+}
+function startMoversRefreshSchedule() {
+  // Fetch once immediately, then every hour independently of the signal scanner.
+  refresh24HourMovers();
+  if (moversTimer) clearInterval(moversTimer);
+  moversTimer = setInterval(() => refresh24HourMovers(), MOVERS_REFRESH_MS);
+}
+
 function beep() {
   if (!$("soundToggle").checked) return;
   try {
@@ -224,6 +322,7 @@ $("clearSignalsBtn").addEventListener("click", () => {
   signalCount = 0; $("signalCount").textContent = "0";
 });
 $("clearLogsBtn").addEventListener("click", () => logsEl.textContent = "Logs cleared.");
+$("refreshMoversBtn").addEventListener("click", () => refresh24HourMovers(true));
 $("copyLatestBtn").addEventListener("click", async () => {
   if (!latestSignalText) return $("telegramMessage").textContent = "No signal to copy yet.";
   try {
@@ -243,3 +342,4 @@ window.addEventListener("beforeunload", () => {
 });
 loadSymbols();
 $("networkStatus").textContent = navigator.onLine ? "Online" : "Offline";
+startMoversRefreshSchedule();

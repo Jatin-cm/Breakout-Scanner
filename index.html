@@ -51,6 +51,42 @@
       <article class="panel"><span class="muted">Network</span><strong id="networkStatus">Checking…</strong></article>
     </section>
 
+
+    <section class="panel movers-panel">
+      <div class="row between movers-heading">
+        <div>
+          <h2>24-hour movers: more than ±20%</h2>
+          <p class="muted">USDT-margined Binance Futures symbols with an absolute 24-hour price change greater than 20%. Refreshes hourly while this page is open.</p>
+        </div>
+        <div class="mover-actions">
+          <span class="refresh-meta" id="moversUpdated">Not loaded yet</span>
+          <button id="refreshMoversBtn" class="secondary">Refresh now</button>
+        </div>
+      </div>
+      <div class="mover-summary">
+        <span id="moversCount">0 coins found</span>
+        <span class="muted" id="moversStatus">Waiting for first update…</span>
+      </div>
+      <div class="table-wrap">
+        <table class="movers-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>24h change</th>
+              <th>Last price</th>
+              <th>24h high</th>
+              <th>24h low</th>
+              <th>Quote volume</th>
+            </tr>
+          </thead>
+          <tbody id="moversBody">
+            <tr><td colspan="6" class="table-empty">Loading 24-hour market data…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Uses Binance USDⓈ-M Futures 24-hour ticker data. The page must remain open and online for scheduled updates; browser throttling can delay them.</p>
+    </section>
+
     <section class="panel">
       <div class="row between"><div><h2>Signal history</h2><p class="muted">New signals appear here and can trigger browser notifications.</p></div><button id="clearSignalsBtn" class="secondary">Clear history</button></div>
       <div id="signals" class="signals empty">No signals yet. Start the scanner to begin.</div>

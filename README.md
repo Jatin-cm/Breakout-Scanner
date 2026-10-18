@@ -8,12 +8,13 @@ This is a browser-only JavaScript conversion of the uploaded Python signal scann
 - **1W + 1H:** fetches 2 weekly candles, uses `klines[-2]` (previous closed weekly candle), then compares the current 1-hour candle high/low against the weekly reference high/low.
 - One high and one low signal per symbol per reference candle (hour or week) while the page remains open.
 - Binance Futures public market data; no Binance API key and no order placement.
+- **24-hour movers panel:** fetches Binance USDⓈ-M Futures 24-hour ticker data immediately on page load, then updates hourly while the page remains open. It lists USDT symbols with absolute 24-hour price change strictly greater than 20%, sorted by largest absolute move, with last price, high/low and quote volume. A manual Refresh now button is also available.
 
 ## Important limitation
 
 This is **not a 24/7 background service**. The scanner runs inside the browser tab:
 - Keep the page open and the device awake.
-- Closing the tab/browser stops scanning.
+- Closing the tab/browser stops scanning and hourly movers refreshes.
 - Mobile and desktop browsers throttle background tabs; sleep, network loss, laptop lid close, or phone power-saving can delay scans.
 - If the page is refreshed, per-session duplicate flags reset. Symbol lists persist in that browser only.
 - It scans sequentially with short pauses and caps each list at 15 symbols to reduce request bursts. Larger lists can take longer and Binance rate limits/network issues may occur.

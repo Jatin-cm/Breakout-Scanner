@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>Binance Breakout Scanner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div>
+        <p class="eyebrow">BINANCE FUTURES · SIGNAL ONLY</p>
+        <h1>Breakout Scanner</h1>
+        <p class="muted">Browser-based scanner for the previous closed 1H and 1W candles.</p>
+      </div>
+      <div id="status" class="pill"><span class="dot"></span><span id="statusText">Stopped</span></div>
+    </header>
+
+    <div class="notice"><strong>Browser requirement:</strong> scanning runs only while this page is open, online, and the device stays awake. Closing the tab or suspending the device stops or delays scans.</div>
+
+    <section class="panel">
+      <div class="row between">
+        <div><h2>Scanner controls</h2><p class="muted">Public Binance Futures market data. No trading orders are placed.</p></div>
+        <div class="buttons"><button id="startBtn" class="primary">Start scanner</button><button id="stopBtn" class="danger" disabled>Stop scanner</button></div>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="fastSymbols">1H + 1M symbols</label>
+          <textarea id="fastSymbols" rows="3" spellcheck="false">BTCUSDT,DOGEUSDT</textarea>
+          <p class="hint">Up to 15 symbols. Comma-separated.</p>
+        </div>
+        <div>
+          <label for="weeklySymbols">1W + 1H symbols</label>
+          <textarea id="weeklySymbols" rows="3" spellcheck="false">BTCUSDT,ETHUSDT</textarea>
+          <p class="hint">Up to 15 symbols. Comma-separated.</p>
+        </div>
+      </div>
+      <div class="buttons">
+        <button id="saveBtn" class="secondary">Save symbol lists</button>
+        <button id="notifyBtn" class="secondary">Enable browser notifications</button>
+        <button id="testBtn" class="secondary">Test alert</button>
+        <label class="check"><input id="soundToggle" type="checkbox" checked> Sound alerts</label>
+      </div>
+    </section>
+
+    <section class="grid stats">
+      <article class="panel"><span class="muted">Last scan</span><strong id="lastScan">—</strong></article>
+      <article class="panel"><span class="muted">Signals this session</span><strong id="signalCount">0</strong></article>
+      <article class="panel"><span class="muted">Network</span><strong id="networkStatus">Checking…</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="row between"><div><h2>Signal history</h2><p class="muted">New signals appear here and can trigger browser notifications.</p></div><button id="clearSignalsBtn" class="secondary">Clear history</button></div>
+      <div id="signals" class="signals empty">No signals yet. Start the scanner to begin.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Telegram alerts — security options</h2>
+      <p>Telegram Bot API requires a bot token. Any token used in this browser is visible to the browser, extensions, and anyone who can inspect the page. <strong>Do not put a real bot token into a public GitHub Pages app.</strong></p>
+      <div class="telegram-options">
+        <div><strong>Recommended for this no-server version</strong><p class="muted">Use browser notifications and sound. For Telegram, copy a signal from the history and send it manually, or use a private relay you control.</p></div>
+        <div><strong>Secure automatic Telegram</strong><p class="muted">Add a small backend/Worker that stores the token as a server-side secret, then send signals to that relay. This is not possible securely with GitHub Pages alone.</p></div>
+      </div>
+      <button id="copyLatestBtn" class="secondary">Copy latest signal</button>
+      <p id="telegramMessage" class="hint"></p>
+    </section>
+
+    <section class="panel">
+      <div class="row between"><h2>Activity log</h2><button id="clearLogsBtn" class="secondary">Clear log</button></div>
+      <pre id="logs" class="logs" aria-live="polite">Ready. Configure symbols and press Start.</pre>
+    </section>
+
+    <footer>Signal-only scanner · No Binance API key required · Never enter exchange trading credentials here.</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

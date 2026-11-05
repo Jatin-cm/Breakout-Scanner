@@ -129,21 +129,28 @@ async function get24HourPositiveMovers() {
 }
 
 async function hasLastFourHigherLow1HCandles(symbol) {
+  // Need 5 closed candles: one reference candle + the 4 candles being tested.
+  // The newest kline is still forming, so request 6 total candles.
   const candles = await fetchKlines(symbol, "1h", 6);
   if (candles.length < 6) return false;
 
-  // The last candle is still forming, so use the four most recent CLOSED candles.
-  const closed = candles.slice(-5, -1);
-  if (closed.length !== 4) return false;
+  // With 6 returned candles:
+  // [0] = older closed reference candle
+  // [1..4] = four most recent CLOSED candles to test
+  // [5] = current/forming candle
+  const referenceCandles = candles.slice(0, 5);
+  const testCandles = referenceCandles.slice(1);
 
-  // Correct concept: the LOW must rise from candle to candle.
-  // Candle 1 low < Candle 2 low < Candle 3 low < Candle 4 low.
-  // Therefore every candle after Candle 1 must NOT break the LOW of the
-  // immediately preceding candle.
-  for (let i = 1; i < closed.length; i++) {
-    const previousLow = Number(closed[i - 1][3]);
-    const currentLow = Number(closed[i][3]);
-    if (!(currentLow > previousLow)) return false;
+  if (testCandles.length !== 4) return false;
+
+  // Correct structure: LOW1 < LOW2 < LOW3 < LOW4.
+  // Every tested candle must have a STRICTLY higher low than the candle immediately before it.
+  for (let i = 1; i < referenceCandles.length; i++) {
+    const previousLow = Number(referenceCandles[i - 1][3]);
+    const currentLow = Number(referenceCandles[i][3]);
+
+    if (!Number.isFinite(previousLow) || !Number.isFinite(currentLow)) return false;
+    if (currentLow <= previousLow) return false;
   }
 
   return true;
@@ -152,7 +159,7 @@ async function hasLastFourHigherLow1HCandles(symbol) {
 async function refresh24HourMovers(manual = false) {
   if (moversFetchInProgress) return;
   moversFetchInProgress = true;
-  $("moversStatus").textContent = "Finding +20% movers and checking whether their last 4 closed 1H candles break the previous candle low…";
+  $("moversStatus").textContent = "Finding +20% movers and checking strict higher lows: Low1 < Low2 < Low3 < Low4…";
   if (manual) $("refreshMoversBtn").disabled = true;
 
   try {
@@ -177,7 +184,7 @@ async function refresh24HourMovers(manual = false) {
     const updated = new Date();
     qualifiedFastUpdatedAt = updated;
     $("moversUpdated").textContent = `Updated ${updated.toLocaleTimeString()}`;
-    $("moversStatus").textContent = `+${MOVERS_THRESHOLD_PERCENT}% 24h movers with last 4 closed 1H candles do not break the previous candle low. These symbols are now being analyzed by 1H + 1M.`;
+    $("moversStatus").textContent = `+${MOVERS_THRESHOLD_PERCENT}% 24h movers with strict higher lows (Low1 < Low2 < Low3 < Low4). These symbols are now being analyzed by 1H + 1M.`;
     $("fastSymbols").value = [...QUALIFIED_FAST_SYMBOLS].join(",");
     log(`Qualified 1H + 1M symbols: ${[...QUALIFIED_FAST_SYMBOLS].join(", ") || "none"}`);
   } catch (error) {

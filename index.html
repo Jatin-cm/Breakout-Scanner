@@ -55,8 +55,8 @@
     <section class="panel movers-panel">
       <div class="row between movers-heading">
         <div>
-          <h2>24-hour movers: more than ±20%</h2>
-          <p class="muted">Only USDT-margined Binance Futures symbols above +20% in 24 hours are checked. A symbol must also have its last 4 closed 1H candles avoid breaking the low of the immediately previous closed 1H candle before it enters the 1H + 1M analyzer.</p>
+          <h2>24-hour movers: more than +20%</h2>
+          <p class="muted">Only USDT-margined Binance Futures symbols above +20% in 24 hours are checked. A symbol enters the 1H + 1M analyzer only when the lows of its last 4 CLOSED 1H candles form a strict higher-low sequence: Low1 < Low2 < Low3 < Low4.</p>
         </div>
         <div class="mover-actions">
           <span class="refresh-meta" id="moversUpdated">Not loaded yet</span>
@@ -84,7 +84,7 @@
           </tbody>
         </table>
       </div>
-      <p class="hint">Pipeline: 24h change &gt; +20% → last 4 closed 1H candles do not break the previous closed candle low → add to 1H + 1M analyzer. The page must remain open and online for scheduled updates; browser throttling can delay them.</p>
+      <p class="hint">Pipeline: 24h change &gt; +20% → last 4 CLOSED 1H lows must satisfy Low1 &lt; Low2 &lt; Low3 &lt; Low4 → add to 1H + 1M analyzer. The page must remain open and online for scheduled updates; browser throttling can delay them.</p>
     </section>
 
     <section class="panel">

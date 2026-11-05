@@ -128,19 +128,31 @@ async function get24HourPositiveMovers() {
     .sort((a, b) => Number(b.priceChangePercent) - Number(a.priceChangePercent));
 }
 
-async function hasLastFourGreen1HCandles(symbol) {
-  const candles = await fetchKlines(symbol, "1h", 5);
-  if (candles.length < 5) return false;
+async function hasLastFourHigherLow1HCandles(symbol) {
+  const candles = await fetchKlines(symbol, "1h", 6);
+  if (candles.length < 6) return false;
 
   // The last candle is still forming, so use the four most recent CLOSED candles.
   const closed = candles.slice(-5, -1);
-  return closed.length === 4 && closed.every(candle => Number(candle[4]) > Number(candle[1]));
+  if (closed.length !== 4) return false;
+
+  // Correct concept: the LOW must rise from candle to candle.
+  // Candle 1 low < Candle 2 low < Candle 3 low < Candle 4 low.
+  // Therefore every candle after Candle 1 must NOT break the LOW of the
+  // immediately preceding candle.
+  for (let i = 1; i < closed.length; i++) {
+    const previousLow = Number(closed[i - 1][3]);
+    const currentLow = Number(closed[i][3]);
+    if (!(currentLow > previousLow)) return false;
+  }
+
+  return true;
 }
 
 async function refresh24HourMovers(manual = false) {
   if (moversFetchInProgress) return;
   moversFetchInProgress = true;
-  $("moversStatus").textContent = "Finding +20% movers and checking their last 4 closed 1H candles…";
+  $("moversStatus").textContent = "Finding +20% movers and checking whether their last 4 closed 1H candles break the previous candle low…";
   if (manual) $("refreshMoversBtn").disabled = true;
 
   try {
@@ -151,7 +163,7 @@ async function refresh24HourMovers(manual = false) {
     const qualified = [];
     for (const coin of movers) {
       try {
-        if (await hasLastFourGreen1HCandles(coin.symbol)) {
+        if (await hasLastFourHigherLow1HCandles(coin.symbol)) {
           QUALIFIED_FAST_SYMBOLS.add(coin.symbol);
           qualified.push(coin);
         }
@@ -165,7 +177,7 @@ async function refresh24HourMovers(manual = false) {
     const updated = new Date();
     qualifiedFastUpdatedAt = updated;
     $("moversUpdated").textContent = `Updated ${updated.toLocaleTimeString()}`;
-    $("moversStatus").textContent = `+${MOVERS_THRESHOLD_PERCENT}% 24h movers with 4 consecutive green closed 1H candles. These symbols are now being analyzed by 1H + 1M.`;
+    $("moversStatus").textContent = `+${MOVERS_THRESHOLD_PERCENT}% 24h movers with last 4 closed 1H candles do not break the previous candle low. These symbols are now being analyzed by 1H + 1M.`;
     $("fastSymbols").value = [...QUALIFIED_FAST_SYMBOLS].join(",");
     log(`Qualified 1H + 1M symbols: ${[...QUALIFIED_FAST_SYMBOLS].join(", ") || "none"}`);
   } catch (error) {
@@ -294,7 +306,7 @@ async function scanOnce() {
     if (!navigator.onLine) throw new Error("Browser is offline");
     const lists = getSymbolLists();
     const tasks = [];
-    // 1H + 1M is driven by the automatic +20% + four-green-1H filter.
+    // 1H + 1M is driven by the automatic +20% + 4-candle no-lower-low filter.
     for (const symbol of QUALIFIED_FAST_SYMBOLS) tasks.push(["1H+1M", symbol, () => scanFastSymbol(symbol)]);
     for (const symbol of lists.weekly) tasks.push(["1W+1H", symbol, () => scanWeeklySymbol(symbol)]);
     for (const [strategy, symbol, fn] of tasks) {

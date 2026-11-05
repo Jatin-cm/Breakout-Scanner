@@ -27,9 +27,9 @@
       </div>
       <div class="grid">
         <div>
-          <label for="fastSymbols">1H + 1M symbols</label>
-          <textarea id="fastSymbols" rows="3" spellcheck="false">BTCUSDT,DOGEUSDT</textarea>
-          <p class="hint">Up to 15 symbols. Comma-separated.</p>
+          <label for="fastSymbols">1H + 1M qualified symbols</label>
+          <textarea id="fastSymbols" rows="3" spellcheck="false" readonly>Waiting for +20% movers…</textarea>
+          <p class="hint">Automatically populated from the +20% mover filter and 4-green-1H check.</p>
         </div>
         <div>
           <label for="weeklySymbols">1W + 1H symbols</label>
@@ -56,7 +56,7 @@
       <div class="row between movers-heading">
         <div>
           <h2>24-hour movers: more than ±20%</h2>
-          <p class="muted">USDT-margined Binance Futures symbols with an absolute 24-hour price change greater than 20%. Refreshes hourly while this page is open.</p>
+          <p class="muted">Only USDT-margined Binance Futures symbols above +20% in 24 hours are checked. A symbol must also have its last 4 closed 1H candles green before it enters the 1H + 1M analyzer.</p>
         </div>
         <div class="mover-actions">
           <span class="refresh-meta" id="moversUpdated">Not loaded yet</span>
@@ -84,7 +84,7 @@
           </tbody>
         </table>
       </div>
-      <p class="hint">Uses Binance USDⓈ-M Futures 24-hour ticker data. The page must remain open and online for scheduled updates; browser throttling can delay them.</p>
+      <p class="hint">Pipeline: 24h change &gt; +20% → last 4 closed 1H candles all green → add to 1H + 1M analyzer. The page must remain open and online for scheduled updates; browser throttling can delay them.</p>
     </section>
 
     <section class="panel">

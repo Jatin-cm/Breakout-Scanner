@@ -8,6 +8,8 @@ const MOVERS_REFRESH_MS = 60 * 60 * 1000;
 const MOVERS_THRESHOLD_PERCENT = 20;
 const SCAN_INTERVAL_MS = 60_000;
 const MAX_SYMBOLS_PER_LIST = 15;
+const QUALIFIED_FAST_SYMBOLS = new Set();
+let qualifiedFastUpdatedAt = null;
 
 let running = false;
 let scanTimer = null;
@@ -112,42 +114,63 @@ function renderMovers(rows) {
     body.appendChild(tr);
   }
 }
+async function get24HourPositiveMovers() {
+  const response = await fetch(BINANCE_24H_TICKER, {cache: "no-store"});
+  if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
+  const data = await response.json();
+  if (!Array.isArray(data)) throw new Error("Unexpected 24-hour ticker response");
+
+  // Only positive movers above +20% are eligible for the 1H + 1M scanner.
+  return data
+    .filter(coin => typeof coin.symbol === "string" && coin.symbol.endsWith("USDT"))
+    .filter(coin => Number.isFinite(Number(coin.priceChangePercent)) &&
+                    Number(coin.priceChangePercent) > MOVERS_THRESHOLD_PERCENT)
+    .sort((a, b) => Number(b.priceChangePercent) - Number(a.priceChangePercent));
+}
+
+async function hasLastFourGreen1HCandles(symbol) {
+  const candles = await fetchKlines(symbol, "1h", 5);
+  if (candles.length < 5) return false;
+
+  // The last candle is still forming, so use the four most recent CLOSED candles.
+  const closed = candles.slice(-5, -1);
+  return closed.length === 4 && closed.every(candle => Number(candle[4]) > Number(candle[1]));
+}
+
 async function refresh24HourMovers(manual = false) {
   if (moversFetchInProgress) return;
   moversFetchInProgress = true;
-  $("moversStatus").textContent = "Fetching Binance Futures ticker data…";
+  $("moversStatus").textContent = "Finding +20% movers and checking their last 4 closed 1H candles…";
   if (manual) $("refreshMoversBtn").disabled = true;
+
   try {
-    const response = await fetch(BINANCE_24H_TICKER, {cache: "no-store"});
-    if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
-    const data = await response.json();
-    if (!Array.isArray(data)) throw new Error("Unexpected 24-hour ticker response");
+    const movers = await get24HourPositiveMovers();
 
-    // Show USDT-margined contracts and either side of a >20% move.
-    const movers = data
-      .filter(coin => typeof coin.symbol === "string" && coin.symbol.endsWith("USDT"))
-      .filter(coin => Number.isFinite(Number(coin.priceChangePercent)) &&
-                      Math.abs(Number(coin.priceChangePercent)) > MOVERS_THRESHOLD_PERCENT)
-      .sort((a, b) => Math.abs(Number(b.priceChangePercent)) - Math.abs(Number(a.priceChangePercent)));
+    // Check the 4-candle trend only for +20% movers.
+    QUALIFIED_FAST_SYMBOLS.clear();
+    const qualified = [];
+    for (const coin of movers) {
+      try {
+        if (await hasLastFourGreen1HCandles(coin.symbol)) {
+          QUALIFIED_FAST_SYMBOLS.add(coin.symbol);
+          qualified.push(coin);
+        }
+      } catch (error) {
+        log(`1H trend check ${coin.symbol} ERROR: ${error.message}`);
+      }
+    }
 
-    renderMovers(movers);
-    $("moversCount").textContent = `${movers.length} coin${movers.length === 1 ? "" : "s"} found`;
+    renderMovers(qualified);
+    $("moversCount").textContent = `${qualified.length} qualified coin${qualified.length === 1 ? "" : "s"}`;
     const updated = new Date();
+    qualifiedFastUpdatedAt = updated;
     $("moversUpdated").textContent = `Updated ${updated.toLocaleTimeString()}`;
-    $("moversStatus").textContent = `Showing USDT contracts with absolute 24h change > ${MOVERS_THRESHOLD_PERCENT}%.`;
-    log(`24h movers refreshed: ${movers.length} USDT futures symbols exceed ±${MOVERS_THRESHOLD_PERCENT}%.`);
+    $("moversStatus").textContent = `+${MOVERS_THRESHOLD_PERCENT}% 24h movers with 4 consecutive green closed 1H candles. These symbols are now being analyzed by 1H + 1M.`;
+    $("fastSymbols").value = [...QUALIFIED_FAST_SYMBOLS].join(",");
+    log(`Qualified 1H + 1M symbols: ${[...QUALIFIED_FAST_SYMBOLS].join(", ") || "none"}`);
   } catch (error) {
     $("moversStatus").textContent = `Update failed: ${error.message}`;
     log(`24h movers ERROR: ${error.message}`);
-    if (!$("moversBody").children.length) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 6;
-      td.className = "table-empty";
-      td.textContent = "Could not load market data. Check your connection and retry.";
-      tr.appendChild(td);
-      $("moversBody").appendChild(tr);
-    }
   } finally {
     moversFetchInProgress = false;
     if (manual) $("refreshMoversBtn").disabled = false;
@@ -271,7 +294,8 @@ async function scanOnce() {
     if (!navigator.onLine) throw new Error("Browser is offline");
     const lists = getSymbolLists();
     const tasks = [];
-    for (const symbol of lists.fast) tasks.push(["1H+1M", symbol, () => scanFastSymbol(symbol)]);
+    // 1H + 1M is driven by the automatic +20% + four-green-1H filter.
+    for (const symbol of QUALIFIED_FAST_SYMBOLS) tasks.push(["1H+1M", symbol, () => scanFastSymbol(symbol)]);
     for (const symbol of lists.weekly) tasks.push(["1W+1H", symbol, () => scanWeeklySymbol(symbol)]);
     for (const [strategy, symbol, fn] of tasks) {
       if (!running) break;

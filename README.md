@@ -44,3 +44,7 @@ A Telegram bot token embedded in JavaScript, HTML, or GitHub repository settings
 - Binance public API can change, be rate-limited, or be unreachable from a browser/network.
 - This is signal-only, not financial advice and not a guarantee of profitable signals.
 - The app uses the browser's local storage only for symbol lists and sound preference. It does not store exchange credentials or Telegram tokens.
+
+
+## JioPhone/KaiOS compatibility
+This version uses ES5 JavaScript and XMLHttpRequest instead of async/await and fetch so older KaiOS browsers can parse and run the scanner.

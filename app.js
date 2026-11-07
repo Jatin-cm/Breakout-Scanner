@@ -1,465 +1,384 @@
-/* Browser-only Binance Futures signal scanner.
-   Telegram settings are entered manually in the page and stored in localStorage. */
-"use strict";
+/* JioPhone/KaiOS-compatible Breakout Scanner.
+   ES5 syntax + XMLHttpRequest + classic DOM events.
+   Keeps the same strategy and UI behavior while avoiding async/await, fetch,
+   arrow functions, const/let, spread syntax, replaceAll/replaceChildren,
+   and other newer APIs that can make older KaiOS browsers fail to parse/run. */
+(function () {
+  "use strict";
 
-const BINANCE_KLINES = "https://fapi.binance.com/fapi/v1/klines";
-const BINANCE_24H_TICKER = "https://fapi.binance.com/fapi/v1/ticker/24hr";
-const MOVERS_REFRESH_MS = 60 * 60 * 1000;
-const MOVERS_THRESHOLD_PERCENT = 20;
-const SCAN_INTERVAL_MS = 60_000;
-const MAX_SYMBOLS_PER_LIST = 15;
-const QUALIFIED_FAST_SYMBOLS = new Set();
-let qualifiedFastUpdatedAt = null;
+  var BINANCE_KLINES = "https://fapi.binance.com/fapi/v1/klines";
+  var BINANCE_24H_TICKER = "https://fapi.binance.com/fapi/v1/ticker/24hr";
+  var MOVERS_REFRESH_MS = 60 * 60 * 1000;
+  var MOVERS_THRESHOLD_PERCENT = 20;
+  var SCAN_INTERVAL_MS = 60 * 1000;
+  var MAX_SYMBOLS_PER_LIST = 15;
+  var QUALIFIED_FAST_SYMBOLS = {};
+  var running = false;
+  var scanTimer = null;
+  var scanInProgress = false;
+  var signalCount = 0;
+  var latestSignalText = "";
+  var moversTimer = null;
+  var moversFetchInProgress = false;
+  var lastHourTimestamp = {};
+  var fastHighSent = {};
+  var fastLowSent = {};
+  var weeklyTimestamp = {};
+  var weeklyHighSent = {};
+  var weeklyLowSent = {};
 
-let running = false;
-let scanTimer = null;
-let scanInProgress = false;
-let lastScanAt = null;
-let signalCount = 0;
-let latestSignalText = "";
-let moversTimer = null;
-let moversFetchInProgress = false;
-const lastHourTimestamp = Object.create(null);
-const fastHighSent = Object.create(null);
-const fastLowSent = Object.create(null);
-const weeklyTimestamp = Object.create(null);
-const weeklyHighSent = Object.create(null);
-const weeklyLowSent = Object.create(null);
+  function $(id) { return document.getElementById(id); }
+  var logsEl = $("logs");
+  var signalsEl = $("signals");
 
-const $ = (id) => document.getElementById(id);
-const logsEl = $("logs");
-const signalsEl = $("signals");
-
-function log(message) {
-  const line = `[${new Date().toLocaleString()}] ${message}`;
-  logsEl.textContent = (line + "\n" + logsEl.textContent).slice(0, 16000);
-}
-function symbolsFrom(text) {
-  return [...new Set(text.split(",").map(s => s.trim().toUpperCase()).filter(Boolean))].slice(0, MAX_SYMBOLS_PER_LIST);
-}
-function getSymbolLists() {
-  return {
-    fast: symbolsFrom($("fastSymbols").value),
-    weekly: symbolsFrom($("weeklySymbols").value)
-  };
-}
-function saveSymbols() {
-  const lists = getSymbolLists();
-  if (!lists.fast.length && !lists.weekly.length) {
-    log("Enter at least one symbol.");
-    return false;
-  }
-  localStorage.setItem("breakout_fast_symbols", lists.fast.join(","));
-  localStorage.setItem("breakout_weekly_symbols", lists.weekly.join(","));
-  $("fastSymbols").value = lists.fast.join(",");
-  $("weeklySymbols").value = lists.weekly.join(",");
-  log("Symbol lists saved in this browser.");
-  return true;
-}
-function loadSymbols() {
-  $("fastSymbols").value = localStorage.getItem("breakout_fast_symbols") || "BTCUSDT,DOGEUSDT";
-  $("weeklySymbols").value = localStorage.getItem("breakout_weekly_symbols") || "BTCUSDT,ETHUSDT";
-  $("soundToggle").checked = localStorage.getItem("breakout_sound") !== "false";
-}
-async function fetchKlines(symbol, interval, limit) {
-  const url = `${BINANCE_KLINES}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`;
-  const response = await fetch(url, {cache:"no-store"});
-  if (!response.ok) throw new Error(`Binance HTTP ${response.status} for ${symbol} ${interval}`);
-  const data = await response.json();
-  if (!Array.isArray(data)) throw new Error(`Unexpected Binance response for ${symbol}`);
-  return data;
-}
-
-function formatPrice(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, {maximumFractionDigits: 8});
-}
-function formatVolume(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString(undefined, {notation: "compact", maximumFractionDigits: 2});
-}
-function renderMovers(rows) {
-  const body = $("moversBody");
-  body.replaceChildren();
-  if (!rows.length) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 6;
-    td.className = "table-empty";
-    td.textContent = `No USDT-margined futures symbols currently exceed ±${MOVERS_THRESHOLD_PERCENT}% in 24 hours.`;
-    tr.appendChild(td);
-    body.appendChild(tr);
-    return;
-  }
-  for (const coin of rows) {
-    const tr = document.createElement("tr");
-    const symbol = document.createElement("td");
-    symbol.className = "coin-symbol";
-    symbol.textContent = coin.symbol;
-    const change = document.createElement("td");
-    const changeValue = Number(coin.priceChangePercent);
-    change.className = changeValue >= 0 ? "change-up" : "change-down";
-    change.textContent = `${changeValue > 0 ? "+" : ""}${changeValue.toFixed(2)}%`;
-    const last = document.createElement("td");
-    last.textContent = formatPrice(coin.lastPrice);
-    const high = document.createElement("td");
-    high.textContent = formatPrice(coin.highPrice);
-    const low = document.createElement("td");
-    low.textContent = formatPrice(coin.lowPrice);
-    const volume = document.createElement("td");
-    volume.textContent = formatVolume(coin.quoteVolume);
-    for (const td of [symbol, change, last, high, low, volume]) tr.appendChild(td);
-    body.appendChild(tr);
-  }
-}
-async function get24HourPositiveMovers() {
-  const response = await fetch(BINANCE_24H_TICKER, {cache: "no-store"});
-  if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
-  const data = await response.json();
-  if (!Array.isArray(data)) throw new Error("Unexpected 24-hour ticker response");
-
-  // Only positive movers above +20% are eligible for the 1H + 1M scanner.
-  return data
-    .filter(coin => typeof coin.symbol === "string" && coin.symbol.endsWith("USDT"))
-    .filter(coin => Number.isFinite(Number(coin.priceChangePercent)) &&
-                    Number(coin.priceChangePercent) > MOVERS_THRESHOLD_PERCENT)
-    .sort((a, b) => Number(b.priceChangePercent) - Number(a.priceChangePercent));
-}
-
-async function hasLastFourHigherLow1HCandles(symbol) {
-  // Need 5 closed candles: one reference candle + the 4 candles being tested.
-  // The newest kline is still forming, so request 6 total candles.
-  const candles = await fetchKlines(symbol, "1h", 6);
-  if (candles.length < 6) return false;
-
-  // With 6 returned candles:
-  // [0] = older closed reference candle
-  // [1..4] = four most recent CLOSED candles to test
-  // [5] = current/forming candle
-  const referenceCandles = candles.slice(0, 5);
-  const testCandles = referenceCandles.slice(1);
-
-  if (testCandles.length !== 4) return false;
-
-  // Correct structure: LOW1 < LOW2 < LOW3 < LOW4.
-  // Every tested candle must have a STRICTLY higher low than the candle immediately before it.
-  for (let i = 1; i < referenceCandles.length; i++) {
-    const previousLow = Number(referenceCandles[i - 1][3]);
-    const currentLow = Number(referenceCandles[i][3]);
-
-    if (!Number.isFinite(previousLow) || !Number.isFinite(currentLow)) return false;
-    if (currentLow <= previousLow) return false;
+  function log(message) {
+    var line = "[" + new Date().toLocaleString() + "] " + message;
+    logsEl.textContent = (line + "\n" + logsEl.textContent).slice(0, 16000);
   }
 
-  return true;
-}
-
-async function refresh24HourMovers(manual = false) {
-  if (moversFetchInProgress) return;
-  moversFetchInProgress = true;
-  $("moversStatus").textContent = "Finding +20% movers and checking strict higher lows: Low1 < Low2 < Low3 < Low4…";
-  if (manual) $("refreshMoversBtn").disabled = true;
-
-  try {
-    const movers = await get24HourPositiveMovers();
-
-    // Check the 4-candle trend only for +20% movers.
-    QUALIFIED_FAST_SYMBOLS.clear();
-    const qualified = [];
-    for (const coin of movers) {
-      try {
-        if (await hasLastFourHigherLow1HCandles(coin.symbol)) {
-          QUALIFIED_FAST_SYMBOLS.add(coin.symbol);
-          qualified.push(coin);
-        }
-      } catch (error) {
-        log(`1H trend check ${coin.symbol} ERROR: ${error.message}`);
+  function symbolsFrom(text) {
+    var parts = String(text || "").split(",");
+    var out = [];
+    var seen = {};
+    var i, s;
+    for (i = 0; i < parts.length; i++) {
+      s = parts[i].replace(/^\s+|\s+$/g, "").toUpperCase();
+      if (s && !seen[s] && out.length < MAX_SYMBOLS_PER_LIST) {
+        seen[s] = true;
+        out.push(s);
       }
     }
-
-    renderMovers(qualified);
-    $("moversCount").textContent = `${qualified.length} qualified coin${qualified.length === 1 ? "" : "s"}`;
-    const updated = new Date();
-    qualifiedFastUpdatedAt = updated;
-    $("moversUpdated").textContent = `Updated ${updated.toLocaleTimeString()}`;
-    $("moversStatus").textContent = `+${MOVERS_THRESHOLD_PERCENT}% 24h movers with strict higher lows (Low1 < Low2 < Low3 < Low4). These symbols are now being analyzed by 1H + 1M.`;
-    $("fastSymbols").value = [...QUALIFIED_FAST_SYMBOLS].join(",");
-    log(`Qualified 1H + 1M symbols: ${[...QUALIFIED_FAST_SYMBOLS].join(", ") || "none"}`);
-  } catch (error) {
-    $("moversStatus").textContent = `Update failed: ${error.message}`;
-    log(`24h movers ERROR: ${error.message}`);
-  } finally {
-    moversFetchInProgress = false;
-    if (manual) $("refreshMoversBtn").disabled = false;
-  }
-}
-function startMoversRefreshSchedule() {
-  // Fetch once immediately, then every hour independently of the signal scanner.
-  refresh24HourMovers();
-  if (moversTimer) clearInterval(moversTimer);
-  moversTimer = setInterval(() => refresh24HourMovers(), MOVERS_REFRESH_MS);
-}
-
-function beep() {
-  if (!$("soundToggle").checked) return;
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.frequency.value = 880; gain.gain.value = 0.06;
-    osc.start(); osc.stop(ctx.currentTime + 0.18);
-    osc.onended = () => ctx.close();
-  } catch (_) {}
-}
-async function notifyBrowser(title, body) {
-  if ("Notification" in window && Notification.permission === "granted") {
-    try { new Notification(title, {body}); } catch (e) { log(`Browser notification error: ${e.message}`); }
-  }
-  beep();
-}
-
-function loadTelegramSettings() {
-  $("telegramToken").value = localStorage.getItem("breakout_telegram_token") || "";
-  $("telegramChatId").value = localStorage.getItem("breakout_telegram_chat_id") || "";
-  $("telegramToggle").checked = localStorage.getItem("breakout_telegram_enabled") === "true";
-}
-
-function saveTelegramSettings() {
-  const token = $("telegramToken").value.trim();
-  const chatId = $("telegramChatId").value.trim();
-  if (!token || !chatId) {
-    $("telegramMessage").textContent = "Enter both the Telegram bot token and chat ID.";
-    log("Telegram settings not saved: token and chat ID are required.");
-    return false;
-  }
-  localStorage.setItem("breakout_telegram_token", token);
-  localStorage.setItem("breakout_telegram_chat_id", chatId);
-  localStorage.setItem("breakout_telegram_enabled", String($("telegramToggle").checked));
-  $("telegramMessage").textContent = "Telegram settings saved in this browser.";
-  log("Telegram settings saved.");
-  return true;
-}
-
-async function sendTelegramMessage(message, force = false) {
-  if (!force && !$("telegramToggle").checked) return {skipped: true};
-
-  const token = $("telegramToken").value.trim();
-  const chatId = $("telegramChatId").value.trim();
-  if (!token || !chatId) {
-    throw new Error("Telegram alerts are enabled, but bot token or chat ID is missing.");
+    return out;
   }
 
-  const url = `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({chat_id: chatId, text: message})
-  });
+  function getSymbolLists() {
+    return { fast: symbolsFrom($("fastSymbols").value), weekly: symbolsFrom($("weeklySymbols").value) };
+  }
 
-  if (!response.ok) {
-    let detail = `Telegram HTTP ${response.status}`;
+  function saveSymbols() {
+    var lists = getSymbolLists();
+    if (!lists.fast.length && !lists.weekly.length) { log("Enter at least one symbol."); return false; }
     try {
-      const data = await response.json();
-      if (data && data.description) detail += `: ${data.description}`;
-    } catch (_) {}
-    throw new Error(detail);
+      localStorage.setItem("breakout_fast_symbols", lists.fast.join(","));
+      localStorage.setItem("breakout_weekly_symbols", lists.weekly.join(","));
+      localStorage.setItem("breakout_sound", $("soundToggle").checked ? "true" : "false");
+    } catch (e) {}
+    $("fastSymbols").value = lists.fast.join(",");
+    $("weeklySymbols").value = lists.weekly.join(",");
+    log("Symbol lists saved in this browser.");
+    return true;
   }
 
-  const data = await response.json();
-  if (!data.ok) throw new Error(data.description || "Telegram API rejected the message.");
-  return data;
-}
+  function loadSymbols() {
+    var fast = "BTCUSDT,DOGEUSDT";
+    var weekly = "BTCUSDT,ETHUSDT";
+    try {
+      fast = localStorage.getItem("breakout_fast_symbols") || fast;
+      weekly = localStorage.getItem("breakout_weekly_symbols") || weekly;
+    } catch (e) {}
+    $("fastSymbols").value = fast;
+    $("weeklySymbols").value = weekly;
+    try { $("soundToggle").checked = localStorage.getItem("breakout_sound") !== "false"; } catch (e2) {}
+  }
 
-async function sendTelegramTest() {
-  if (!saveTelegramSettings()) return;
-  $("telegramMessage").textContent = "Sending test message…";
-  try {
-    await sendTelegramMessage("🟢 Telegram test successful\n\nBinance Breakout Scanner is connected and ready to send signals.", true);
-    $("telegramMessage").textContent = "Test Telegram sent successfully.";
-    log("Telegram test message sent successfully.");
-  } catch (error) {
-    $("telegramMessage").textContent = `Telegram test failed: ${error.message}`;
-    log(`Telegram ERROR: ${error.message}`);
+  function xhrJson(url, callback, errorCallback) {
+    var xhr = new XMLHttpRequest();
+    try {
+      xhr.open("GET", url, true);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { callback(JSON.parse(xhr.responseText)); }
+          catch (e) { errorCallback(new Error("Invalid JSON response")); }
+        } else {
+          errorCallback(new Error("HTTP " + xhr.status));
+        }
+      };
+      xhr.onerror = function () { errorCallback(new Error("Network request failed")); };
+      xhr.ontimeout = function () { errorCallback(new Error("Network request timed out")); };
+      xhr.timeout = 20000;
+      xhr.send(null);
+    } catch (e2) { errorCallback(e2); }
   }
-}
-function addSignal(kind, symbol, timeframe, reference, price) {
-  const time = new Date();
-  const high = kind.toLowerCase().includes("high") || kind.toLowerCase().includes("breakout");
-  const label = high ? "HIGH BREAKOUT" : "LOW BREAKDOWN";
-  const text = `${high ? "🚀" : "🔻"} ${label}\nSymbol: ${symbol}\nStrategy: ${timeframe}\nReference level: ${reference}\nObserved price: ${price}\nTime: ${time.toLocaleString()}`;
-  latestSignalText = text;
-  signalCount++;
-  $("signalCount").textContent = String(signalCount);
-  if (signalsEl.classList.contains("empty")) {
-    signalsEl.classList.remove("empty");
-    signalsEl.textContent = "";
+
+  function fetchKlines(symbol, interval, limit, callback, errorCallback) {
+    var url = BINANCE_KLINES + "?symbol=" + encodeURIComponent(symbol) + "&interval=" + interval + "&limit=" + limit;
+    xhrJson(url, function (data) {
+      if (!(data instanceof Array)) { errorCallback(new Error("Unexpected Binance response for " + symbol)); return; }
+      callback(data);
+    }, function (err) {
+      errorCallback(new Error(err.message + " for " + symbol + " " + interval));
+    });
   }
-  const card = document.createElement("article");
-  card.className = `signal ${high ? "high" : "low"}`;
-  const head = document.createElement("div");
-  head.className = "signal-head";
-  const title = document.createElement("span");
-  title.textContent = `${high ? "🚀" : "🔻"} ${symbol} · ${label}`;
-  const timestamp = document.createElement("span");
-  timestamp.className = "muted";
-  timestamp.textContent = time.toLocaleTimeString();
-  const body = document.createElement("p");
-  body.textContent = `Strategy: ${timeframe}\nReference: ${reference}\nObserved: ${price}`;
-  head.append(title, timestamp); card.append(head, body);
-  signalsEl.prepend(card);
-  while (signalsEl.children.length > 100) signalsEl.lastElementChild.remove();
-  log(text.replaceAll("\n", " | "));
-  notifyBrowser(`${symbol} ${label}`, `${timeframe}: ${price}`);
-  sendTelegramMessage(text).then(() => {
-    log(`Telegram alert sent: ${symbol} ${label}`);
-  }).catch(error => {
-    log(`Telegram alert ERROR for ${symbol}: ${error.message}`);
-  });
-}
-async function scanFastSymbol(symbol) {
-  // Preserve original logic: compare the current 1-minute candle's high/low
-  // to the previous CLOSED 1-hour candle's high/low (klines[-2]).
-  const h1 = await fetchKlines(symbol, "1h", 2);
-  if (h1.length < 2) return;
-  const previous = h1[h1.length - 2];
-  const candleTs = Number(previous[0]);
-  const refHigh = Number(previous[2]);
-  const refLow = Number(previous[3]);
-  if (lastHourTimestamp[symbol] !== candleTs) {
-    lastHourTimestamp[symbol] = candleTs;
-    fastHighSent[symbol] = false;
-    fastLowSent[symbol] = false;
+
+  function formatPrice(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return "—";
+    return n.toLocaleString(undefined, { maximumFractionDigits: 8 });
   }
-  const m1 = await fetchKlines(symbol, "1m", 1);
-  if (!m1.length) return;
-  const currentHigh = Number(m1[0][2]);
-  const currentLow = Number(m1[0][3]);
-  if (currentHigh > refHigh && !fastHighSent[symbol]) {
-    addSignal("high", symbol, "1H + 1M", refHigh, currentHigh);
-    fastHighSent[symbol] = true;
+  function formatVolume(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return "—";
+    return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
   }
-  if (currentLow < refLow && !fastLowSent[symbol]) {
-    addSignal("low", symbol, "1H + 1M", refLow, currentLow);
-    fastLowSent[symbol] = true;
+
+  function clearChildren(el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
   }
-}
-async function scanWeeklySymbol(symbol) {
-  // Preserve original logic: compare the current 1-hour candle's high/low
-  // to the previous CLOSED weekly candle's high/low (klines[-2]).
-  const w1 = await fetchKlines(symbol, "1w", 2);
-  if (w1.length < 2) return;
-  const previous = w1[w1.length - 2];
-  const weekTs = Number(previous[0]);
-  const weekHigh = Number(previous[2]);
-  const weekLow = Number(previous[3]);
-  if (weeklyTimestamp[symbol] !== weekTs) {
-    weeklyTimestamp[symbol] = weekTs;
-    weeklyHighSent[symbol] = false;
-    weeklyLowSent[symbol] = false;
-  }
-  const h1 = await fetchKlines(symbol, "1h", 1);
-  if (!h1.length) return;
-  const currentHigh = Number(h1[0][2]);
-  const currentLow = Number(h1[0][3]);
-  if (currentHigh > weekHigh && !weeklyHighSent[symbol]) {
-    addSignal("high", symbol, "1W + 1H", weekHigh, currentHigh);
-    weeklyHighSent[symbol] = true;
-  }
-  if (currentLow < weekLow && !weeklyLowSent[symbol]) {
-    addSignal("low", symbol, "1W + 1H", weekLow, currentLow);
-    weeklyLowSent[symbol] = true;
-  }
-}
-async function scanOnce() {
-  if (!running || scanInProgress) return;
-  scanInProgress = true;
-  $("networkStatus").textContent = navigator.onLine ? "Online" : "Offline";
-  try {
-    if (!navigator.onLine) throw new Error("Browser is offline");
-    const lists = getSymbolLists();
-    const tasks = [];
-    // 1H + 1M is driven by the automatic +20% + 4-candle no-lower-low filter.
-    for (const symbol of QUALIFIED_FAST_SYMBOLS) tasks.push(["1H+1M", symbol, () => scanFastSymbol(symbol)]);
-    for (const symbol of lists.weekly) tasks.push(["1W+1H", symbol, () => scanWeeklySymbol(symbol)]);
-    for (const [strategy, symbol, fn] of tasks) {
-      if (!running) break;
-      try { await fn(); }
-      catch (e) { log(`${strategy} ${symbol} ERROR: ${e.message}`); }
-      await new Promise(resolve => setTimeout(resolve, 250));
+
+  function renderMovers(rows) {
+    var body = $("moversBody"), i, coin, tr, td, v;
+    clearChildren(body);
+    if (!rows.length) {
+      tr = document.createElement("tr"); td = document.createElement("td"); td.colSpan = 6;
+      td.className = "table-empty";
+      td.textContent = "No USDT-margined futures symbols currently exceed +" + MOVERS_THRESHOLD_PERCENT + "% in 24 hours.";
+      tr.appendChild(td); body.appendChild(tr); return;
     }
-    lastScanAt = new Date();
-    $("lastScan").textContent = lastScanAt.toLocaleTimeString();
-  } finally {
-    scanInProgress = false;
+    for (i = 0; i < rows.length; i++) {
+      coin = rows[i]; tr = document.createElement("tr");
+      td = document.createElement("td"); td.className = "coin-symbol"; td.textContent = coin.symbol; tr.appendChild(td);
+      td = document.createElement("td"); v = Number(coin.priceChangePercent); td.className = v >= 0 ? "change-up" : "change-down"; td.textContent = (v > 0 ? "+" : "") + v.toFixed(2) + "%"; tr.appendChild(td);
+      td = document.createElement("td"); td.textContent = formatPrice(coin.lastPrice); tr.appendChild(td);
+      td = document.createElement("td"); td.textContent = formatPrice(coin.highPrice); tr.appendChild(td);
+      td = document.createElement("td"); td.textContent = formatPrice(coin.lowPrice); tr.appendChild(td);
+      td = document.createElement("td"); td.textContent = formatVolume(coin.quoteVolume); tr.appendChild(td);
+      body.appendChild(tr);
+    }
   }
-}
-function setRunning(value) {
-  running = value;
-  $("status").className = `pill ${running ? "running" : "stopped"}`;
-  $("statusText").textContent = running ? "Running in this tab" : "Stopped";
-  $("startBtn").disabled = running;
-  $("stopBtn").disabled = !running;
-  if (scanTimer) clearInterval(scanTimer);
-  scanTimer = null;
-  if (running) {
-    log("Scanner started.");
-    scanOnce();
-    scanTimer = setInterval(scanOnce, SCAN_INTERVAL_MS);
-  } else {
-    log("Scanner stopped.");
+
+  function get24HourPositiveMovers(callback, errorCallback) {
+    xhrJson(BINANCE_24H_TICKER, function (data) {
+      var out = [], i, c, n;
+      if (!(data instanceof Array)) { errorCallback(new Error("Unexpected 24-hour ticker response")); return; }
+      for (i = 0; i < data.length; i++) {
+        c = data[i]; n = Number(c.priceChangePercent);
+        if (typeof c.symbol === "string" && c.symbol.indexOf("USDT") === c.symbol.length - 4 && isFinite(n) && n > MOVERS_THRESHOLD_PERCENT) out.push(c);
+      }
+      out.sort(function (a, b) { return Number(b.priceChangePercent) - Number(a.priceChangePercent); });
+      callback(out);
+    }, errorCallback);
   }
-}
-$("startBtn").addEventListener("click", () => {
-  if (saveSymbols()) setRunning(true);
-});
-$("stopBtn").addEventListener("click", () => setRunning(false));
-$("saveBtn").addEventListener("click", saveSymbols);
-$("notifyBtn").addEventListener("click", async () => {
-  if (!("Notification" in window)) return log("This browser does not support notifications.");
-  const permission = await Notification.requestPermission();
-  log(`Browser notification permission: ${permission}`);
-});
-$("testBtn").addEventListener("click", () => {
-  addSignal("high", "TEST", "Test alert", "—", "—");
-});
-$("saveTelegramBtn").addEventListener("click", saveTelegramSettings);
-$("testTelegramBtn").addEventListener("click", sendTelegramTest);
-$("telegramToggle").addEventListener("change", () => {
-  localStorage.setItem("breakout_telegram_enabled", String($("telegramToggle").checked));
-  $("telegramMessage").textContent = $("telegramToggle").checked ? "Telegram alerts enabled." : "Telegram alerts disabled.";
-});
-$("soundToggle").addEventListener("change", () => localStorage.setItem("breakout_sound", String($("soundToggle").checked)));
-$("clearSignalsBtn").addEventListener("click", () => {
-  signalsEl.replaceChildren();
-  signalsEl.classList.add("empty");
-  signalsEl.textContent = "History cleared.";
-  signalCount = 0; $("signalCount").textContent = "0";
-});
-$("clearLogsBtn").addEventListener("click", () => logsEl.textContent = "Logs cleared.");
-$("refreshMoversBtn").addEventListener("click", () => refresh24HourMovers(true));
-$("copyLatestBtn").addEventListener("click", async () => {
-  if (!latestSignalText) return $("telegramMessage").textContent = "No signal to copy yet.";
-  try {
-    await navigator.clipboard.writeText(latestSignalText);
-    $("telegramMessage").textContent = "Latest signal copied. Paste it into Telegram.";
-  } catch (_) {
-    $("telegramMessage").textContent = latestSignalText;
+
+  function hasLastFourHigherLow1HCandles(symbol, callback, errorCallback) {
+    fetchKlines(symbol, "1h", 6, function (candles) {
+      var i, previousLow, currentLow;
+      if (candles.length < 6) { callback(false); return; }
+      for (i = 1; i < 5; i++) {
+        previousLow = Number(candles[i - 1][3]); currentLow = Number(candles[i][3]);
+        if (!isFinite(previousLow) || !isFinite(currentLow) || currentLow <= previousLow) { callback(false); return; }
+      }
+      callback(true);
+    }, errorCallback);
   }
-});
-window.addEventListener("online", () => { $("networkStatus").textContent = "Online"; log("Network online."); });
-window.addEventListener("offline", () => { $("networkStatus").textContent = "Offline"; log("Network offline."); });
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden && running) log("Warning: tab is hidden. Browser throttling may delay scans.");
-});
-window.addEventListener("beforeunload", () => {
-  if (scanTimer) clearInterval(scanTimer);
-});
-loadSymbols();
-loadTelegramSettings();
-$("networkStatus").textContent = navigator.onLine ? "Online" : "Offline";
-startMoversRefreshSchedule();
+
+  function checkMoverList(movers, index, qualified, done) {
+    if (index >= movers.length) { done(qualified); return; }
+    var coin = movers[index];
+    hasLastFourHigherLow1HCandles(coin.symbol, function (ok) {
+      if (ok) { QUALIFIED_FAST_SYMBOLS[coin.symbol] = true; qualified.push(coin); }
+      checkMoverList(movers, index + 1, qualified, done);
+    }, function (err) {
+      log("1H trend check " + coin.symbol + " ERROR: " + err.message);
+      checkMoverList(movers, index + 1, qualified, done);
+    });
+  }
+
+  function refresh24HourMovers(manual) {
+    if (moversFetchInProgress) return;
+    moversFetchInProgress = true;
+    $("moversStatus").textContent = "Finding +20% movers and checking strict higher lows...";
+    if (manual) $("refreshMoversBtn").disabled = true;
+    get24HourPositiveMovers(function (movers) {
+      QUALIFIED_FAST_SYMBOLS = {};
+      checkMoverList(movers, 0, [], function (qualified) {
+        renderMovers(qualified);
+        $("moversCount").textContent = qualified.length + " qualified coin" + (qualified.length === 1 ? "" : "s");
+        $("moversUpdated").textContent = "Updated " + new Date().toLocaleTimeString();
+        $("moversStatus").textContent = "+20% 24h movers with strict higher lows are now analyzed by 1H + 1M.";
+        var names = [], k;
+        for (k in QUALIFIED_FAST_SYMBOLS) if (QUALIFIED_FAST_SYMBOLS.hasOwnProperty(k)) names.push(k);
+        $("fastSymbols").value = names.join(",");
+        log("Qualified 1H + 1M symbols: " + (names.join(", ") || "none"));
+        moversFetchInProgress = false;
+        if (manual) $("refreshMoversBtn").disabled = false;
+      });
+    }, function (error) {
+      $("moversStatus").textContent = "Update failed: " + error.message;
+      log("24h movers ERROR: " + error.message);
+      moversFetchInProgress = false;
+      if (manual) $("refreshMoversBtn").disabled = false;
+    });
+  }
+
+  function startMoversRefreshSchedule() {
+    refresh24HourMovers(false);
+    if (moversTimer) clearInterval(moversTimer);
+    moversTimer = setInterval(function () { refresh24HourMovers(false); }, MOVERS_REFRESH_MS);
+  }
+
+  function beep() {
+    if (!$("soundToggle").checked) return;
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      var ctx = new Ctx(); var osc = ctx.createOscillator(); var gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination); osc.frequency.value = 880; gain.gain.value = 0.06;
+      osc.start(); osc.stop(ctx.currentTime + 0.18);
+    } catch (e) {}
+  }
+
+  function notifyBrowser(title, body) {
+    try {
+      if (window.Notification && Notification.permission === "granted") new Notification(title, { body: body });
+    } catch (e) {}
+    beep();
+  }
+
+  function loadTelegramSettings() {
+    var token = "", chat = "", enabled = false;
+    try { token = localStorage.getItem("breakout_telegram_token") || ""; chat = localStorage.getItem("breakout_telegram_chat_id") || ""; enabled = localStorage.getItem("breakout_telegram_enabled") === "true"; } catch (e) {}
+    $("telegramToken").value = token; $("telegramChatId").value = chat; $("telegramToggle").checked = enabled;
+  }
+
+  function saveTelegramSettings() {
+    var token = $("telegramToken").value.replace(/^\s+|\s+$/g, "");
+    var chatId = $("telegramChatId").value.replace(/^\s+|\s+$/g, "");
+    if (!token || !chatId) { $("telegramMessage").textContent = "Enter both the Telegram bot token and chat ID."; log("Telegram settings not saved: token and chat ID are required."); return false; }
+    try {
+      localStorage.setItem("breakout_telegram_token", token); localStorage.setItem("breakout_telegram_chat_id", chatId); localStorage.setItem("breakout_telegram_enabled", String($("telegramToggle").checked));
+    } catch (e) {}
+    $("telegramMessage").textContent = "Telegram settings saved in this browser."; log("Telegram settings saved."); return true;
+  }
+
+  function sendTelegramMessage(message, force, done) {
+    if (!force && !$("telegramToggle").checked) { done(null, { skipped: true }); return; }
+    var token = $("telegramToken").value.replace(/^\s+|\s+$/g, "");
+    var chatId = $("telegramChatId").value.replace(/^\s+|\s+$/g, "");
+    if (!token || !chatId) { done(new Error("Telegram alerts are enabled, but bot token or chat ID is missing.")); return; }
+    var url = "https://api.telegram.org/bot" + encodeURIComponent(token) + "/sendMessage";
+    var xhr = new XMLHttpRequest();
+    try {
+      xhr.open("POST", url, true); xhr.setRequestHeader("Content-Type", "application/json"); xhr.timeout = 20000;
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status < 200 || xhr.status >= 300) { done(new Error("Telegram HTTP " + xhr.status)); return; }
+        try { var data = JSON.parse(xhr.responseText); if (!data.ok) done(new Error(data.description || "Telegram API rejected the message.")); else done(null, data); }
+        catch (e) { done(new Error("Invalid Telegram response")); }
+      };
+      xhr.onerror = function () { done(new Error("Telegram network request failed")); };
+      xhr.ontimeout = function () { done(new Error("Telegram request timed out")); };
+      xhr.send(JSON.stringify({ chat_id: chatId, text: message }));
+    } catch (e2) { done(e2); }
+  }
+
+  function sendTelegramTest() {
+    if (!saveTelegramSettings()) return;
+    $("telegramMessage").textContent = "Sending test message...";
+    sendTelegramMessage("🟢 Telegram test successful\n\nBinance Breakout Scanner is connected and ready to send signals.", true, function (err) {
+      if (err) { $("telegramMessage").textContent = "Telegram test failed: " + err.message; log("Telegram ERROR: " + err.message); }
+      else { $("telegramMessage").textContent = "Test Telegram sent successfully."; log("Telegram test message sent successfully."); }
+    });
+  }
+
+  function addSignal(kind, symbol, timeframe, reference, price) {
+    var time = new Date();
+    var high = kind.toLowerCase().indexOf("high") >= 0 || kind.toLowerCase().indexOf("breakout") >= 0;
+    var label = high ? "HIGH BREAKOUT" : "LOW BREAKDOWN";
+    var text = (high ? "🚀" : "🔻") + " " + label + "\nSymbol: " + symbol + "\nStrategy: " + timeframe + "\nReference level: " + reference + "\nObserved price: " + price + "\nTime: " + time.toLocaleString();
+    latestSignalText = text; signalCount++; $("signalCount").textContent = String(signalCount);
+    if (signalsEl.className.indexOf("empty") >= 0) { signalsEl.className = signalsEl.className.replace(/\bempty\b/g, "").replace(/^\s+|\s+$/g, ""); clearChildren(signalsEl); }
+    var card = document.createElement("article"); card.className = "signal " + (high ? "high" : "low");
+    var head = document.createElement("div"); head.className = "signal-head";
+    var title = document.createElement("span"); title.textContent = (high ? "🚀" : "🔻") + " " + symbol + " · " + label;
+    var timestamp = document.createElement("span"); timestamp.className = "muted"; timestamp.textContent = time.toLocaleTimeString();
+    var body = document.createElement("p"); body.textContent = "Strategy: " + timeframe + "\nReference: " + reference + "\nObserved: " + price;
+    head.appendChild(title); head.appendChild(timestamp); card.appendChild(head); card.appendChild(body); signalsEl.insertBefore(card, signalsEl.firstChild);
+    while (signalsEl.children.length > 100) signalsEl.removeChild(signalsEl.lastChild);
+    log(text.split("\n").join(" | ")); notifyBrowser(symbol + " " + label, timeframe + ": " + price);
+    sendTelegramMessage(text, false, function (err) { if (err) log("Telegram alert ERROR for " + symbol + ": " + err.message); else log("Telegram alert sent: " + symbol + " " + label); });
+  }
+
+  function scanFastSymbol(symbol, done) {
+    fetchKlines(symbol, "1h", 2, function (h1) {
+      if (h1.length < 2) { done(); return; }
+      var previous = h1[h1.length - 2]; var candleTs = Number(previous[0]); var refHigh = Number(previous[2]); var refLow = Number(previous[3]);
+      if (lastHourTimestamp[symbol] !== candleTs) { lastHourTimestamp[symbol] = candleTs; fastHighSent[symbol] = false; fastLowSent[symbol] = false; }
+      fetchKlines(symbol, "1m", 1, function (m1) {
+        if (!m1.length) { done(); return; }
+        var currentHigh = Number(m1[0][2]); var currentLow = Number(m1[0][3]);
+        if (currentHigh > refHigh && !fastHighSent[symbol]) { addSignal("high", symbol, "1H + 1M", refHigh, currentHigh); fastHighSent[symbol] = true; }
+        if (currentLow < refLow && !fastLowSent[symbol]) { addSignal("low", symbol, "1H + 1M", refLow, currentLow); fastLowSent[symbol] = true; }
+        done();
+      }, function (e) { log("1H+1M " + symbol + " ERROR: " + e.message); done(); });
+    }, function (e2) { log("1H+1M " + symbol + " ERROR: " + e2.message); done(); });
+  }
+
+  function scanWeeklySymbol(symbol, done) {
+    fetchKlines(symbol, "1w", 2, function (w1) {
+      if (w1.length < 2) { done(); return; }
+      var previous = w1[w1.length - 2]; var weekTs = Number(previous[0]); var weekHigh = Number(previous[2]); var weekLow = Number(previous[3]);
+      if (weeklyTimestamp[symbol] !== weekTs) { weeklyTimestamp[symbol] = weekTs; weeklyHighSent[symbol] = false; weeklyLowSent[symbol] = false; }
+      fetchKlines(symbol, "1h", 1, function (h1) {
+        if (!h1.length) { done(); return; }
+        var currentHigh = Number(h1[0][2]); var currentLow = Number(h1[0][3]);
+        if (currentHigh > weekHigh && !weeklyHighSent[symbol]) { addSignal("high", symbol, "1W + 1H", weekHigh, currentHigh); weeklyHighSent[symbol] = true; }
+        if (currentLow < weekLow && !weeklyLowSent[symbol]) { addSignal("low", symbol, "1W + 1H", weekLow, currentLow); weeklyLowSent[symbol] = true; }
+        done();
+      }, function (e) { log("1W+1H " + symbol + " ERROR: " + e.message); done(); });
+    }, function (e2) { log("1W+1H " + symbol + " ERROR: " + e2.message); done(); });
+  }
+
+  function runTasks(tasks, index, done) {
+    if (!running || index >= tasks.length) { done(); return; }
+    tasks[index].fn(function () { setTimeout(function () { runTasks(tasks, index + 1, done); }, 250); });
+  }
+
+  function scanOnce() {
+    if (!running || scanInProgress) return;
+    scanInProgress = true; $("networkStatus").textContent = navigator.onLine ? "Online" : "Offline";
+    if (!navigator.onLine) { log("Browser is offline"); scanInProgress = false; return; }
+    var lists = getSymbolLists(), tasks = [], i;
+    for (var k in QUALIFIED_FAST_SYMBOLS) if (QUALIFIED_FAST_SYMBOLS.hasOwnProperty(k)) (function (symbol) { tasks.push({ fn: function (done) { scanFastSymbol(symbol, done); } }); })(k);
+    for (i = 0; i < lists.weekly.length; i++) (function (symbol2) { tasks.push({ fn: function (done) { scanWeeklySymbol(symbol2, done); } }); })(lists.weekly[i]);
+    runTasks(tasks, 0, function () { $("lastScan").textContent = new Date().toLocaleTimeString(); scanInProgress = false; });
+  }
+
+  function setRunning(value) {
+    running = value; $("status").className = "pill " + (running ? "running" : "stopped"); $("statusText").textContent = running ? "Running in this tab" : "Stopped";
+    $("startBtn").disabled = running; $("stopBtn").disabled = !running;
+    if (scanTimer) clearInterval(scanTimer); scanTimer = null;
+    if (running) { log("Scanner started."); scanOnce(); scanTimer = setInterval(scanOnce, SCAN_INTERVAL_MS); }
+    else log("Scanner stopped.");
+  }
+
+  function bindButton(id, fn) {
+    var el = $(id);
+    el.onclick = fn;
+    el.ontouchend = function (e) { try { if (e && e.preventDefault) e.preventDefault(); } catch (_) {} fn(); return false; };
+  }
+
+  bindButton("startBtn", function () { if (saveSymbols()) setRunning(true); });
+  bindButton("stopBtn", function () { setRunning(false); });
+  bindButton("saveBtn", saveSymbols);
+  bindButton("notifyBtn", function () {
+    try { if (window.Notification && Notification.requestPermission) Notification.requestPermission(function (p) { log("Browser notification permission: " + p); }); else log("This browser does not support notifications."); }
+    catch (e) { log("Notification error: " + e.message); }
+  });
+  bindButton("testBtn", function () { addSignal("high", "TEST", "Test alert", "—", "—"); });
+  bindButton("saveTelegramBtn", saveTelegramSettings);
+  bindButton("testTelegramBtn", sendTelegramTest);
+  bindButton("clearSignalsBtn", function () { clearChildren(signalsEl); signalsEl.className = "signals empty"; signalsEl.textContent = "History cleared."; signalCount = 0; $("signalCount").textContent = "0"; });
+  bindButton("clearLogsBtn", function () { logsEl.textContent = "Logs cleared."; });
+  bindButton("refreshMoversBtn", function () { refresh24HourMovers(true); });
+  bindButton("copyLatestBtn", function () { if (!latestSignalText) { $("telegramMessage").textContent = "No signal to copy yet."; return; } $("telegramMessage").textContent = latestSignalText; });
+
+  $("telegramToggle").onclick = function () { try { localStorage.setItem("breakout_telegram_enabled", String($("telegramToggle").checked)); } catch (e) {} $("telegramMessage").textContent = $("telegramToggle").checked ? "Telegram alerts enabled." : "Telegram alerts disabled."; };
+  $("soundToggle").onclick = function () { try { localStorage.setItem("breakout_sound", String($("soundToggle").checked)); } catch (e) {} };
+  window.addEventListener("online", function () { $("networkStatus").textContent = "Online"; log("Network online."); });
+  window.addEventListener("offline", function () { $("networkStatus").textContent = "Offline"; log("Network offline."); });
+
+  loadSymbols(); loadTelegramSettings(); $("networkStatus").textContent = navigator.onLine ? "Online" : "Offline";
+  log("JioPhone-compatible scanner loaded.");
+  startMoversRefreshSchedule();
+})();

@@ -11,7 +11,7 @@ label{display:block;font-weight:700;margin:13px 0 7px}textarea{width:100%;resize
 .telegram-options{display:grid;grid-template-columns:1fr 1fr;gap:12px}.telegram-options>div{padding:13px;border-radius:12px;background:#0d1426;border:1px solid #34415f}.telegram-options p{margin:.45em 0 0}
 .logs{background:#080d19;border:1px solid #26324b;border-radius:12px;padding:14px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;color:#b9c7df;font-size:.86rem}
 footer{text-align:center;color:#73809a;font-size:.84rem;margin-top:22px}
-@media(max-width:700px){.top,.row.between{align-items:flex-start;flex-direction:column}.grid,.stats,.telegram-options{grid-template-columns:1fr}.buttons button{flex:1}}
+@media(max-width:700px){.top,.row.between{align-items:flex-start;flex-direction:column}.grid,.stats,.telegram-options,.telegram-grid{grid-template-columns:1fr}.buttons button{flex:1}}
 
 
 /* 24-hour movers table */
@@ -32,3 +32,5 @@ footer{text-align:center;color:#73809a;font-size:.84rem;margin-top:22px}
 .change-down{color:#ff7884;font-weight:800}
 .table-empty{text-align:center!important;color:#9ca9c2;padding:24px!important}
 @media(max-width:700px){.movers-heading{flex-direction:column}.mover-actions{width:100%;justify-content:space-between}}
+
+.telegram-grid{margin-top:12px}.telegram-grid input{width:100%;box-sizing:border-box;background:#0d1426;border:1px solid #34415f;color:#e9efff;border-radius:10px;padding:11px 12px;font:inherit;outline:none}.telegram-grid input:focus{border-color:#7896ff}.telegram-grid label{display:block;margin-bottom:7px;font-weight:700}

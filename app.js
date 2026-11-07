@@ -1,5 +1,5 @@
 /* Browser-only Binance Futures signal scanner.
-   Keep this page open for scanning. Do not add Telegram bot tokens here. */
+   Telegram settings are entered manually in the page and stored in localStorage. */
 "use strict";
 
 const BINANCE_KLINES = "https://fapi.binance.com/fapi/v1/klines";
@@ -222,6 +222,71 @@ async function notifyBrowser(title, body) {
   }
   beep();
 }
+
+function loadTelegramSettings() {
+  $("telegramToken").value = localStorage.getItem("breakout_telegram_token") || "";
+  $("telegramChatId").value = localStorage.getItem("breakout_telegram_chat_id") || "";
+  $("telegramToggle").checked = localStorage.getItem("breakout_telegram_enabled") === "true";
+}
+
+function saveTelegramSettings() {
+  const token = $("telegramToken").value.trim();
+  const chatId = $("telegramChatId").value.trim();
+  if (!token || !chatId) {
+    $("telegramMessage").textContent = "Enter both the Telegram bot token and chat ID.";
+    log("Telegram settings not saved: token and chat ID are required.");
+    return false;
+  }
+  localStorage.setItem("breakout_telegram_token", token);
+  localStorage.setItem("breakout_telegram_chat_id", chatId);
+  localStorage.setItem("breakout_telegram_enabled", String($("telegramToggle").checked));
+  $("telegramMessage").textContent = "Telegram settings saved in this browser.";
+  log("Telegram settings saved.");
+  return true;
+}
+
+async function sendTelegramMessage(message) {
+  if (!$("telegramToggle").checked) return {skipped: true};
+
+  const token = $("telegramToken").value.trim();
+  const chatId = $("telegramChatId").value.trim();
+  if (!token || !chatId) {
+    throw new Error("Telegram alerts are enabled, but bot token or chat ID is missing.");
+  }
+
+  const url = `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({chat_id: chatId, text: message})
+  });
+
+  if (!response.ok) {
+    let detail = `Telegram HTTP ${response.status}`;
+    try {
+      const data = await response.json();
+      if (data && data.description) detail += `: ${data.description}`;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+
+  const data = await response.json();
+  if (!data.ok) throw new Error(data.description || "Telegram API rejected the message.");
+  return data;
+}
+
+async function sendTelegramTest() {
+  if (!saveTelegramSettings()) return;
+  $("telegramMessage").textContent = "Sending test message…";
+  try {
+    await sendTelegramMessage("🟢 Telegram test successful\n\nBinance Breakout Scanner is connected and ready to send signals.");
+    $("telegramMessage").textContent = "Test Telegram sent successfully.";
+    log("Telegram test message sent successfully.");
+  } catch (error) {
+    $("telegramMessage").textContent = `Telegram test failed: ${error.message}`;
+    log(`Telegram ERROR: ${error.message}`);
+  }
+}
 function addSignal(kind, symbol, timeframe, reference, price) {
   const time = new Date();
   const high = kind.toLowerCase().includes("high") || kind.toLowerCase().includes("breakout");
@@ -250,6 +315,11 @@ function addSignal(kind, symbol, timeframe, reference, price) {
   while (signalsEl.children.length > 100) signalsEl.lastElementChild.remove();
   log(text.replaceAll("\n", " | "));
   notifyBrowser(`${symbol} ${label}`, `${timeframe}: ${price}`);
+  sendTelegramMessage(text).then(() => {
+    log(`Telegram alert sent: ${symbol} ${label}`);
+  }).catch(error => {
+    log(`Telegram alert ERROR for ${symbol}: ${error.message}`);
+  });
 }
 async function scanFastSymbol(symbol) {
   // Preserve original logic: compare the current 1-minute candle's high/low
@@ -357,6 +427,12 @@ $("notifyBtn").addEventListener("click", async () => {
 $("testBtn").addEventListener("click", () => {
   addSignal("high", "TEST", "Test alert", "—", "—");
 });
+$("saveTelegramBtn").addEventListener("click", saveTelegramSettings);
+$("testTelegramBtn").addEventListener("click", sendTelegramTest);
+$("telegramToggle").addEventListener("change", () => {
+  localStorage.setItem("breakout_telegram_enabled", String($("telegramToggle").checked));
+  $("telegramMessage").textContent = $("telegramToggle").checked ? "Telegram alerts enabled." : "Telegram alerts disabled.";
+});
 $("soundToggle").addEventListener("change", () => localStorage.setItem("breakout_sound", String($("soundToggle").checked)));
 $("clearSignalsBtn").addEventListener("click", () => {
   signalsEl.replaceChildren();
@@ -384,5 +460,6 @@ window.addEventListener("beforeunload", () => {
   if (scanTimer) clearInterval(scanTimer);
 });
 loadSymbols();
+loadTelegramSettings();
 $("networkStatus").textContent = navigator.onLine ? "Online" : "Offline";
 startMoversRefreshSchedule();

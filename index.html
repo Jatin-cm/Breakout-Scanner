@@ -93,13 +93,27 @@
     </section>
 
     <section class="panel">
-      <h2>Telegram alerts — security options</h2>
-      <p>Telegram Bot API requires a bot token. Any token used in this browser is visible to the browser, extensions, and anyone who can inspect the page. <strong>Do not put a real bot token into a public GitHub Pages app.</strong></p>
-      <div class="telegram-options">
-        <div><strong>Recommended for this no-server version</strong><p class="muted">Use browser notifications and sound. For Telegram, copy a signal from the history and send it manually, or use a private relay you control.</p></div>
-        <div><strong>Secure automatic Telegram</strong><p class="muted">Add a small backend/Worker that stores the token as a server-side secret, then send signals to that relay. This is not possible securely with GitHub Pages alone.</p></div>
+      <h2>Telegram alerts</h2>
+      <p class="muted">Enter your Telegram bot token and chat ID below. The scanner will automatically send every new breakout/breakdown signal to that chat.</p>
+      <div class="grid telegram-grid">
+        <div>
+          <label for="telegramToken">Telegram bot token</label>
+          <input id="telegramToken" type="password" autocomplete="off" placeholder="123456789:AA...">
+          <p class="hint">Create the bot with @BotFather and paste the token here.</p>
+        </div>
+        <div>
+          <label for="telegramChatId">Telegram chat ID</label>
+          <input id="telegramChatId" type="text" inputmode="numeric" autocomplete="off" placeholder="123456789 or -1001234567890">
+          <p class="hint">Use the chat/group/channel ID that should receive alerts.</p>
+        </div>
       </div>
-      <button id="copyLatestBtn" class="secondary">Copy latest signal</button>
+      <div class="buttons">
+        <button id="saveTelegramBtn" class="secondary">Save Telegram settings</button>
+        <button id="testTelegramBtn" class="secondary">Send test Telegram</button>
+        <button id="copyLatestBtn" class="secondary">Copy latest signal</button>
+        <label class="check"><input id="telegramToggle" type="checkbox"> Telegram alerts</label>
+      </div>
+      <p class="hint">Settings are stored only in this browser using localStorage. <strong>Important:</strong> a bot token entered into a GitHub Pages/browser app is visible to the browser and can be exposed to anyone who can inspect the page. Use this only if you accept that risk; for a public deployment, a server-side/Worker relay is safer.</p>
       <p id="telegramMessage" class="hint"></p>
     </section>
 

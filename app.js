@@ -245,8 +245,8 @@ function saveTelegramSettings() {
   return true;
 }
 
-async function sendTelegramMessage(message) {
-  if (!$("telegramToggle").checked) return {skipped: true};
+async function sendTelegramMessage(message, force = false) {
+  if (!force && !$("telegramToggle").checked) return {skipped: true};
 
   const token = $("telegramToken").value.trim();
   const chatId = $("telegramChatId").value.trim();
@@ -279,7 +279,7 @@ async function sendTelegramTest() {
   if (!saveTelegramSettings()) return;
   $("telegramMessage").textContent = "Sending test message…";
   try {
-    await sendTelegramMessage("🟢 Telegram test successful\n\nBinance Breakout Scanner is connected and ready to send signals.");
+    await sendTelegramMessage("🟢 Telegram test successful\n\nBinance Breakout Scanner is connected and ready to send signals.", true);
     $("telegramMessage").textContent = "Test Telegram sent successfully.";
     log("Telegram test message sent successfully.");
   } catch (error) {

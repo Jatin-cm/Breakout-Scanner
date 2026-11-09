@@ -160,22 +160,29 @@
     }, errorCallback);
   }
 
-  function hasLastFourHigherLow1HCandles(symbol, callback, errorCallback) {
-    fetchKlines(symbol, "1h", 6, function (candles) {
-      var i, previousLow, currentLow;
-      if (candles.length < 6) { callback(false); return; }
-      for (i = 1; i < 5; i++) {
-        previousLow = Number(candles[i - 1][3]); currentLow = Number(candles[i][3]);
-        if (!isFinite(previousLow) || !isFinite(currentLow) || currentLow <= previousLow) { callback(false); return; }
+  function hasLastThreeHigherLow1HCandles(symbol, callback, errorCallback) {
+  fetchKlines(symbol, "1h", 5, function (candles) {
+    var i, previousLow, currentLow;
+    if (candles.length < 5) { callback(false); return; }
+
+    for (i = 2; i < 5; i++) {
+      previousLow = Number(candles[i - 1][3]);
+      currentLow = Number(candles[i][3]);
+
+      if (!isFinite(previousLow) || !isFinite(currentLow) || currentLow <= previousLow) {
+        callback(false);
+        return;
       }
-      callback(true);
-    }, errorCallback);
-  }
+    }
+
+    callback(true);
+  }, errorCallback);
+}
 
   function checkMoverList(movers, index, qualified, done) {
     if (index >= movers.length) { done(qualified); return; }
     var coin = movers[index];
-    hasLastFourHigherLow1HCandles(coin.symbol, function (ok) {
+    hasLastThreeHigherLow1HCandles(coin.symbol, function (ok) {
       if (ok) { QUALIFIED_FAST_SYMBOLS[coin.symbol] = true; qualified.push(coin); }
       checkMoverList(movers, index + 1, qualified, done);
     }, function (err) {

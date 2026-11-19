@@ -161,16 +161,16 @@
   }
 
   function hasLastThreeHigherLow1HCandles(symbol, callback, errorCallback) {
-  fetchKlines(symbol, "1h", 5, function (candles) {
-    var i, previousLow, currentLow;
-    if (candles.length < 5) { callback(false); return; }
+  // fetchKlines(symbol, "1h", 5, function (candles) {
+  //   var i, previousLow, currentLow;
+  //   if (candles.length < 5) { callback(false); return; }
 
-    for (i = 2; i < 5; i++) {
-      previousLow = Number(candles[i - 1][3]);
-      currentLow = Number(candles[i][3]);
+  //   for (i = 2; i < 5; i++) {
+  //     previousLow = Number(candles[i - 1][3]);
+  //     currentLow = Number(candles[i][3]);
 
-      if (!isFinite(previousLow) || !isFinite(currentLow) || currentLow <= previousLow) {
-        callback(false);
+  //     if (!isFinite(previousLow) || !isFinite(currentLow) || currentLow <= previousLow) {
+  //       callback(false);
         return;
       }
     }
